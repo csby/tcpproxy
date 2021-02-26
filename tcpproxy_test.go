@@ -38,7 +38,7 @@ import (
 
 type noopTarget struct{}
 
-func (noopTarget) HandleConn(net.Conn) {}
+func (noopTarget) HandleConn(conn net.Conn, listenAddress, hostName string) {}
 
 func TestMatchHTTPHost(t *testing.T) {
 	tests := []struct {

@@ -35,7 +35,7 @@ func TestListenerAccept(t *testing.T) {
 
 	for i := 0; i < 3; i++ {
 		conn := new(Conn)
-		tl.HandleConn(conn)
+		tl.HandleConn(conn, "", "")
 		got := <-ch
 		if got != conn {
 			t.Errorf("Accept conn = %v; want %v", got, conn)

@@ -68,7 +68,7 @@ func (tl *TargetListener) Close() error {
 
 // HandleConn implements the Target interface. It blocks until tl is
 // closed or another goroutine has called Accept and received c.
-func (tl *TargetListener) HandleConn(c net.Conn) {
+func (tl *TargetListener) HandleConn(c net.Conn, listenAddress, hostName string) {
 	tl.lock()
 	defer tl.mu.Unlock()
 	for tl.nextConn != nil && !tl.closed {

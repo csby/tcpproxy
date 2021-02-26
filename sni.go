@@ -122,7 +122,7 @@ func tryACME(ctx context.Context, ch chan<- Target, dest Target, sni string) {
 
 	conn, targetConn := net.Pipe()
 	defer conn.Close()
-	go dest.HandleConn(targetConn)
+	go dest.HandleConn(targetConn, "", sni)
 
 	deadline, ok := ctx.Deadline()
 	if ok {

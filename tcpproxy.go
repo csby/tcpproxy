@@ -55,6 +55,7 @@ package tcpproxy
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
@@ -218,13 +219,14 @@ func (p *Proxy) serveListener(ret chan<- error, ln net.Listener, routes []route)
 			ret <- err
 			return
 		}
-		go p.serveConn(c, routes)
+		addr := ln.Addr().String()
+		go p.serveConn(c, routes, addr)
 	}
 }
 
 // serveConn runs in its own goroutine and matches c against routes.
 // It returns whether it matched purely for testing.
-func (p *Proxy) serveConn(c net.Conn, routes []route) bool {
+func (p *Proxy) serveConn(c net.Conn, routes []route, ListenAddress string) bool {
 	br := bufio.NewReader(c)
 	for _, route := range routes {
 		if target, hostName := route.match(br); target != nil {
@@ -236,7 +238,7 @@ func (p *Proxy) serveConn(c net.Conn, routes []route) bool {
 					Conn:     c,
 				}
 			}
-			target.HandleConn(c)
+			target.HandleConn(c, ListenAddress, hostName)
 			return true
 		}
 	}
@@ -292,7 +294,7 @@ type Target interface {
 	// The concrete type of conn will be of type *Conn if any
 	// bytes have been consumed for the purposes of route
 	// matching.
-	HandleConn(net.Conn)
+	HandleConn(conn net.Conn, listenAddress, hostName string)
 }
 
 // To is shorthand way of writing &tlsproxy.DialProxy{Addr: addr}.
@@ -336,6 +338,9 @@ type DialProxy struct {
 	// no graceful downgrade.
 	// If zero, no PROXY header is sent. Currently, version 1 is supported.
 	ProxyProtocolVersion int
+
+	OnConnected    func(id, addr, domain, source, target string)
+	OnDisconnected func(id, addr, domain, source, target string)
 }
 
 // UnderlyingConn returns c.Conn if c of type *Conn,
@@ -349,8 +354,21 @@ func UnderlyingConn(c net.Conn) net.Conn {
 
 func goCloseConn(c net.Conn) { go c.Close() }
 
+func newGuid() string {
+	uuid := make([]byte, 16)
+	n, err := io.ReadFull(rand.Reader, uuid)
+	if n != len(uuid) || err != nil {
+		return ""
+	}
+
+	uuid[8] = uuid[8]&^0xc0 | 0x80
+	uuid[6] = uuid[6]&^0xf0 | 0x40
+
+	return fmt.Sprintf("%x%x%x%x%x", uuid[0:4], uuid[4:6], uuid[6:8], uuid[8:10], uuid[10:])
+}
+
 // HandleConn implements the Target interface.
-func (dp *DialProxy) HandleConn(src net.Conn) {
+func (dp *DialProxy) HandleConn(src net.Conn, listenAddress, hostName string) {
 	ctx := context.Background()
 	var cancel context.CancelFunc
 	if dp.DialTimeout >= 0 {
@@ -383,10 +401,21 @@ func (dp *DialProxy) HandleConn(src net.Conn) {
 		}
 	}
 
+	id := newGuid()
+	srcAddr := src.RemoteAddr().String()
+	dstAddr := dst.RemoteAddr().String()
+	if dp.OnConnected != nil {
+		go dp.OnConnected(id, listenAddress, hostName, srcAddr, dstAddr)
+	}
+
 	errc := make(chan error, 1)
 	go proxyCopy(errc, src, dst)
 	go proxyCopy(errc, dst, src)
 	<-errc
+
+	if dp.OnDisconnected != nil {
+		go dp.OnDisconnected(id, listenAddress, hostName, srcAddr, dstAddr)
+	}
 }
 
 func (dp *DialProxy) sendProxyHeader(w io.Writer, src net.Conn) error {
